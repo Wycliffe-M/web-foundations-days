@@ -1,0 +1,92 @@
+/* ---------- Colour variables (light theme) ---------- */
+:root {
+    --bg: #f4f6f8;
+    --card: #ffffff;
+    --text: #1f2933;
+    --muted: #52606d;
+    --border: #cbd2d9;
+    --accent: #0ba184;
+    --accent-hover: #087f68;
+    --warning: #e07b00;
+    --danger: #c62828;
+}
+
+/* ---------- Dark theme: only redefine the variables ---------- */
+body.dark {
+    --bg: #121820;
+    --card: #1c2530;
+    --text: #e4e7eb;
+    --muted: #9aa5b1;
+    --border: #3e4c59;
+    --accent: #2bc0a3;
+    --accent-hover: #4fd1b8;
+    --warning: #ffa94d;
+    --danger: #ff6b6b;
+}
+
+* {
+    box-sizing: border-box;
+}
+
+body {
+    margin: 0;
+    padding: 24px 16px;
+    font-family: system-ui, sans-serif;
+    background-color: var(--bg);
+    color: var(--text);
+}
+
+main {
+    max-width: 600px;
+    margin: 0 auto;
+    padding: 24px;
+    background-color: var(--card);
+    border: 1px solid var(--border);
+    border-radius: 8px;
+}
+
+label {
+    display: block;
+    margin-bottom: 8px;
+    font-weight: bold;
+}
+
+textarea {
+    width: 100%;
+    padding: 10px;
+    font: inherit;
+    color: var(--text);
+    background-color: var(--card);
+    border: 1px solid var(--border);
+    border-radius: 6px;
+    resize: vertical;
+}
+
+button {
+    margin-right: 8px;
+    padding: 8px 16px;
+    font: inherit;
+    color: #ffffff;
+    background-color: var(--accent);
+    border: none;
+    border-radius: 6px;
+    cursor: pointer;
+}
+
+button:hover {
+    background-color: var(--accent-hover);
+}
+
+/* ---------- Counter states ---------- */
+main p {
+    color: var(--muted);
+}
+
+.warning {
+    color: var(--warning);
+}
+
+.over {
+    color: var(--danger);
+    font-weight: bold;
+}
