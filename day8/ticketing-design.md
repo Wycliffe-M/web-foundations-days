@@ -6,24 +6,19 @@ TicketHub is a website where people browse concerts and events, pick seats and b
 
 **Functional:** browse events, view seats, hold seats for a few minutes, pay, and view my tickets.
 
-**Non-functional**
-
-- **Speed:** event and seat pages load in under 1 second.
-- **Correctness:** a seat is never sold to two people.
-- **Fairness:** in a big sale, buyers are served in the order they arrive.
-- **Availability:** 99.9%, and the site stays up during a big sale.
+**Non-functional:** **speed** (pages under 1 second), **correctness** (a seat is never sold to two people), **fairness** (in a big sale, buyers are served in arrival order), **availability** (99.9%, and the site stays up in a big sale).
 
 ## 2. Estimates
 
-**Assumptions:** 1 day is about 100,000 seconds; peak is about 5x average.
+Assumptions: 1 day is about 100,000 seconds; peak is about 5x average.
 
-- **Normal day:** 50,000 visitors x 10 pages = 500,000 views, so 500,000 / 100,000 = **5 views/s** (about 25/s at peak). 5,000 tickets per day = **0.05 tickets/s**.
-- **Big sale:** 200,000 buyers in 600 s = **333 buyers/s**. At about 5 requests each, that is **about 1,700 requests/s**. At most 33 seats/s can sell, and 10 people compete for each seat, so 90% fail.
-- **Comparison:** about 65x the normal rate for views, and thousands of times for purchase attempts (333 vs 0.05 per second). One server copes on a normal day, but not in a sale.
+- **Normal day:** 50,000 visitors x 10 pages = 500,000 views, so **5 views/s** (about 25/s at peak). 5,000 tickets/day = **0.05 tickets/s**.
+- **Big sale:** 200,000 buyers in 600 s = **333 buyers/s**, about 5 requests each = **about 1,700 requests/s**. At most 33 seats/s can sell, and 10 people compete for each seat, so 90% fail.
+- **Comparison:** about 65x the normal rate for views, and thousands of times for purchase attempts. One server copes on a normal day, but not in a sale.
 
 ## 3. API
 
-Base URL `/api`, JSON, plural nouns, Bearer token for logged-in routes, stateless.
+Base URL `/api`, JSON, plural nouns, Bearer token, stateless.
 
 | Method | Endpoint             | Purpose                                                 | Success |
 | ------ | -------------------- | ------------------------------------------------------- | ------- |
@@ -47,12 +42,11 @@ Base URL `/api`, JSON, plural nouns, Bearer token for logged-in routes, stateles
 | `orders` | `id` PK, `user_id` FK, `total_cents`, `status`, `created_at`                                                                           |
 
 **Relationships (one-to-many):** event to seats, user to orders and holds, order to seats, hold to seats. A seat belongs to at most one order, so no join table is needed.
-
-**Constraints (a safety net even if the app has a bug):** `UNIQUE (event_id, section, row_label, seat_number)`; `CHECK (status IN ('free','held','sold'))`. **Index:** `seats(event_id, status)` for the seat map, the most frequent read.
+**Constraints (a safety net):** `UNIQUE (event_id, section, row_label, seat_number)`; `CHECK (status IN ('free','held','sold'))`. **Index:** `seats(event_id, status)` for the seat map.
 
 ## 5. Preventing Double-Booking
 
-The database, not the app server, decides who wins, using a **transaction** and an **atomic conditional update**. Hold step:
+The database, not the app server, decides who wins, using a **transaction** and an **atomic conditional update**:
 
 ```sql
 BEGIN;
@@ -65,41 +59,33 @@ COMMIT;
 ```
 
 - `AND status = 'free'` makes the check and the change one atomic step. The second of two simultaneous buyers finds the seat already `held`, changes 0 rows and gets **409**. Checking in the app first would be a race.
-- The transaction is all or nothing: if one seat is taken, none are held.
-- **Expiry and pay:** a worker frees seats whose 5-minute hold has run out. `POST /orders` runs in one transaction: confirm payment, create the order, and set seats to `sold` with `AND status = 'held' AND hold_id = ?`.
+- All or nothing: if one seat is taken, none are held.
+- **Expiry and pay:** a worker frees seats whose hold has run out. `POST /orders` confirms payment, creates the order and sets seats to `sold` with `AND status = 'held' AND hold_id = ?`, in one transaction.
 
-## 6. Architecture
+## 6. Trade-offs
+
+- **Cached seat map vs live consistency:** Redis keeps reads fast, but a cached map may show a just-taken seat and give a 409. This is acceptable because the database check is final.
+- **Waiting room vs open access:** the queue makes buyers wait, but it protects the database and gives everyone a fair turn.
+- **Hold time:** 5 minutes stops double-booking while people pay, but abandoned holds block a seat until they expire.
+
+## 7. Architecture
 
 ```
-Browser
-   |
-CDN (static files, event pages)
-   |
-Load balancer (health checks, rate limits)
-   |
-Waiting room (queue, big sales only)
-   |
-App servers x 3+ (stateless)
-   |              |                   |
- Redis        Primary DB         Payment provider
- (cache)        |     |           (external)
-             Replica  Expiry worker
+Browser -> CDN -> Load balancer -> Waiting room -> App servers (x3+, stateless)
+                                                     |-> Redis (cache)
+                                                     |-> Primary DB -> Read replica
+                                                     |      ^
+                                                     |   Expiry worker
+                                                     |-> Payment provider (external)
 ```
 
 - **CDN:** serves static files and event pages near users.
 - **Load balancer:** spreads requests, skips unhealthy servers, returns 429 to abusers.
-- **Waiting room:** lets buyers in **in arrival order** at a rate the database can handle. This is the fairness requirement.
+- **Waiting room:** lets buyers in **in arrival order** at a rate the database can handle (the fairness requirement).
 - **App servers:** stateless; 3 normally, 10+ before a sale.
 - **Redis:** caches event details and the seat map for 1-2 seconds.
 - **Primary database:** the single source of truth; runs the section 5 transactions.
-- **Read replica:** serves event lists and "my tickets".
-- **Expiry worker:** frees seats whose hold has expired.
+- **Read replica / expiry worker:** the replica serves event lists and "my tickets"; the worker frees expired holds.
 - **Payment provider:** external; if it fails, the hold stays valid and the buyer can retry.
 
-**Surviving the big sale:** about 1,700 requests/s arrive, but the CDN and cache answer most reads and the waiting room keeps the load on the database steady. Only about 33 seats/s can sell, which one PostgreSQL primary handles. Losing buyers get a fast 409.
-
-## 7. Trade-offs
-
-- **Fairness vs speed:** the waiting room makes buyers wait, but it protects the database and gives everyone a fair turn.
-- **Hold time:** 5 minutes stops double-booking while people pay, but abandoned holds block a seat until they expire.
-- **Cache freshness vs load:** a cached seat map may show a just-taken seat and give a 409. This is acceptable because the database check is final.
+**Surviving the big sale:** the CDN and cache answer most of the 1,700 requests/s, the waiting room keeps database load steady, and only about 33 seats/s can sell, which one PostgreSQL primary handles.
